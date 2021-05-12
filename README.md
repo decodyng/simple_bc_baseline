@@ -174,7 +174,7 @@ The inline documentation in these files will guide you in interfacing with evalu
 
 ## IMPORTANT: Saving Models during Training!
 
-Before you sbumit make sure that your code does the following.
+Before you submit make sure that your code does the following.
 
 * **During training** (`train.py`) **save your models to the `train/` folder.**
 * **During testing** (`test.py`) **load your model from the `train/` folder.**
@@ -226,7 +226,7 @@ and if everything works out correctly, then you should be able to see the final 
 
 ### Round 1
 
-You have to train your models locally **with under 8,000,000 samples** and with **worse or comprable hardware to that above** and upload the trained model in `train/` directory. But, to make sure, your training code is compatible with further round's interface, the training code will be executed in this round as well. The constraints will be timeout of 5 minutes.
+You have to train your models locally **with under 8,000,000 samples** and with **worse or comparable hardware to that above** and upload the trained model in `train/` directory. But, to make sure, your training code is compatible with further round's interface, the training code will be executed in this round as well. The constraints will be timeout of 5 minutes.
 
 ### Round 2
 
@@ -271,7 +271,7 @@ aicrowd_minerl_starter_kit❯ ./utility/evaluation_locally.sh
 ...
 ```
 
-For running/testing your submission in a docker environment (ideantical to online submission), you can use `./utility/docker_train_locally.sh` and `./utility/docker_evaluation_locally.sh`. You can also run docker image with bash entrypoint for debugging on the go with the help of `./utility/docker_run.sh`. These scripts respect following parameters:
+For running/testing your submission in a docker environment (identical to online submission), you can use `./utility/docker_train_locally.sh` and `./utility/docker_evaluation_locally.sh`. You can also run docker image with bash entrypoint for debugging on the go with the help of `./utility/docker_run.sh`. These scripts respect following parameters:
 
 * `--no-build`: To skip docker image build and use the last build image
 * `--nvidia`: To use `nvidia-docker` instead of `docker` which include your nvidia related drivers inside docker image
