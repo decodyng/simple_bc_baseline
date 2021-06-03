@@ -14,17 +14,20 @@ import gym
 import minerl
 import abc
 import numpy as np
-
+import torch as th
 import coloredlogs
 coloredlogs.install(logging.DEBUG)
+from basalt_baselines.bc import bc_baseline, WRAPPERS as bc_wrappers
+import realistic_benchmarks # TODO remove when Caves is ported into MineRL
 
 # All the evaluations will be evaluated on MineRLObtainDiamondVectorObf-v0 environment
-MINERL_GYM_ENV = os.getenv('MINERL_GYM_ENV', 'MineRLObtainDiamondVectorObf-v0')
+MINERL_GYM_ENV = os.getenv('MINERL_GYM_ENV', 'FindCaves-v0')
 MINERL_MAX_EVALUATION_EPISODES = int(os.getenv('MINERL_MAX_EVALUATION_EPISODES', 5))
 
 # Parallel testing/inference, **you can override** below value based on compute
 # requirements, etc to save OOM in this phase.
 EVALUATION_THREAD_COUNT = int(os.getenv('EPISODES_EVALUATION_THREAD_COUNT', 2))
+TRAINING_EXPERIMENT = bc_baseline
 
 class EpisodeDone(Exception):
     pass
@@ -49,6 +52,13 @@ class Episode(gym.Env):
             raise EpisodeDone()
         else:
             return s,r,d,i
+
+    def wrap_env(self, wrappers):
+        for wrapper in wrappers:
+            self.env = wrapper(self.env)
+        self.action_space = self.env.action_space
+        self.observation_space = self.env.observation_space
+
 
 
 
@@ -101,6 +111,25 @@ class MineRLAgentBase(abc.ABC):
 # YOUR CODE GOES HERE #
 #######################
 
+class MineRLBehavioralCloningAgent(MineRLAgentBase):
+    def load_agent(self):
+        self.policy = th.load("train/trained_policy.pt")
+        self.policy.eval()
+
+    def run_agent_on_episode(self, single_episode_env : Episode):
+        # Get wrappers used in BC somehow, and wrap environment with those
+        single_episode_env.wrap_env(bc_wrappers)
+        obs = single_episode_env.reset()
+        done = False
+        while not done:
+            action, _, _ = self.policy.forward(th.from_numpy(obs).unsqueeze(0))
+            try:
+                obs, reward, done, _ = single_episode_env.step(th.squeeze(action))
+            except EpisodeDone:
+                done = True
+                continue
+
+
 class MineRLMatrixAgent(MineRLAgentBase):
     """
     An example random agent. 
@@ -149,7 +178,7 @@ class MineRLRandomAgent(MineRLAgentBase):
 #####################################################################
 # IMPORTANT: SET THIS VARIABLE WITH THE AGENT CLASS YOU ARE USING   # 
 ######################################################################
-AGENT_TO_TEST = MineRLMatrixAgent # MineRLMatrixAgent, MineRLRandomAgent, YourAgentHere
+AGENT_TO_TEST = MineRLBehavioralCloningAgent # MineRLMatrixAgent, MineRLRandomAgent, YourAgentHere
 
 
 
@@ -168,23 +197,25 @@ def main():
     envs = [gym.make(MINERL_GYM_ENV) for _ in range(EVALUATION_THREAD_COUNT)]
     episodes_per_thread = [MINERL_MAX_EVALUATION_EPISODES // EVALUATION_THREAD_COUNT for _ in range(EVALUATION_THREAD_COUNT)]
     episodes_per_thread[-1] += MINERL_MAX_EVALUATION_EPISODES - EVALUATION_THREAD_COUNT *(MINERL_MAX_EVALUATION_EPISODES // EVALUATION_THREAD_COUNT)
-    # A simple funciton to evaluate on episodes!
-    def evaluate(i, env):
-        print("[{}] Starting evaluator.".format(i))
-        for i in range(episodes_per_thread[i]):
-            try:
-                agent.run_agent_on_episode(Episode(env))
-            except EpisodeDone:
-                print("[{}] Episode complete".format(i))
-                pass
-    
-    evaluator_threads = [threading.Thread(target=evaluate, args=(i, envs[i])) for i in range(EVALUATION_THREAD_COUNT)]
-    for thread in evaluator_threads:
-        thread.start()
+    # A simple function to evaluate on episodes!
 
-    # wait fo the evaluation to finish
-    for thread in evaluator_threads:
-        thread.join()
+    agent.run_agent_on_episode(Episode(envs[0]))
+    # def evaluate(i, env):
+    #     print("[{}] Starting evaluator.".format(i))
+    #     for i in range(episodes_per_thread[i]):
+    #         try:
+    #             agent.run_agent_on_episode(Episode(env))
+    #         except EpisodeDone:
+    #             print("[{}] Episode complete".format(i))
+    #             pass
+    
+    # evaluator_threads = [threading.Thread(target=evaluate, args=(i, envs[i])) for i in range(EVALUATION_THREAD_COUNT)]
+    # for thread in evaluator_threads:
+    #     thread.start()
+    #
+    # # wait for the evaluation to finish
+    # for thread in evaluator_threads:
+    #     thread.join()
 
 if __name__ == "__main__":
     main()

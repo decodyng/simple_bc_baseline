@@ -1,40 +1,59 @@
+import minerl
 from sacred import Experiment
 import basalt_utils.wrappers as wrapper_utils
-import stable_baselines3.common.policies as sb3_pols
 from stable_baselines3.common.torch_layers import NatureCNN
 from basalt_utils.sb3_compat.policies import SpaceFlatteningActorCriticPolicy
+from basalt_utils.sb3_compat.cnns import MAGICALCNN
+from stable_baselines3.common.policies import ActorCriticCnnPolicy
 from imitation.algorithms.bc import BC
 import torch as th
 from basalt_utils import utils
 import os
+import imitation.util.logger as imitation_logger
+from time import time
 
 bc_baseline = Experiment("basalt_bc_baseline")
 
+WRAPPERS = [# Transforms continuous camera action into discrete up/down/no-change buckets on both pitch and yaw
+            wrapper_utils.CameraDiscretizationWrapper,
+            # Flattens a Dict action space into a Box, but retains memory of how to expand back out
+            wrapper_utils.ActionFlatteningWrapper,
+            # Pull out only the POV observation from the observation space; transpose axes for SB3 compatibility
+            utils.ExtractPOVAndTranspose] #,
+
+            # Add a time limit to the environment (only relevant for testing)
+            # utils.Testing10000StepLimitWrapper,
+            # wrapper_utils.FrameSkip]
 
 @bc_baseline.config
 def default_config():
-    task_name = "FindCaves-v0"
+    task_name = "MineRLFindCaves-v0"
     train_batches = 10
     train_epochs = None
     log_interval = 1
-    data_root = "/Users/cody/Code/il-representations/data/minecraft"
+    data_root = os.getenv('MINERL_DATA_ROOT', "/Users/cody/Code/il-representations/data/minecraft")
+    # SpaceFlatteningActorCriticPolicy is a policy that supports a flattened Dict action space by
+    # maintaining multiple sub-distributions and merging their results
     policy_class = SpaceFlatteningActorCriticPolicy
-    wrappers = [wrapper_utils.CameraDiscretizationWrapper,
-                wrapper_utils.ActionFlatteningWrapper,
-                utils.ExtractPOVAndTranspose,
-                utils.Testing10000StepLimitWrapper,
-                wrapper_utils.FrameSkip]
+    wrappers = WRAPPERS
     save_location = "/Users/cody/Code/simple_bc_baseline/results"
-    batch_size = 16
-    n_traj = 16
+    policy_path = 'trained_policy.pt'
+    batch_size = 32
+    n_traj = None
     lr = 1e-4
+    _ = locals()
+    del _
+
+@bc_baseline.named_config
+def normal_policy_class():
+    policy_class = ActorCriticCnnPolicy
     _ = locals()
     del _
 
 
 @bc_baseline.automain
 def train_bc(task_name, batch_size, data_root, wrappers, train_epochs, n_traj, lr,
-             policy_class, train_batches, log_interval, save_location):
+             policy_class, train_batches, log_interval, save_location, policy_path):
 
     # This code is designed to let you either train for a fixed number of batches, or for a fixed number of epochs
     assert train_epochs is None or train_batches is None, \
@@ -56,11 +75,21 @@ def train_bc(task_name, batch_size, data_root, wrappers, train_epochs, n_traj, l
     # (2) Calls `np.squeeze` recursively on all the nested dict spaces to remove the sequence dimension, since we're
     #     just doing single-frame BC here
     data_iter = utils.create_data_iterator(wrapped_dummy_env, data_pipeline, batch_size, train_epochs, n_traj)
-    policy = policy_class(observation_space=wrapped_dummy_env.observation_space,
-                          action_space=wrapped_dummy_env.action_space,
-                          env=wrapped_dummy_env,
-                          lr_schedule=lambda _: 1e100,
-                          features_extractor_class=NatureCNN)
+    if policy_class == SpaceFlatteningActorCriticPolicy:
+        policy = policy_class(observation_space=wrapped_dummy_env.observation_space,
+                              action_space=wrapped_dummy_env.action_space,
+                              env=wrapped_dummy_env,
+                              lr_schedule=lambda _: 1e-4,
+                              features_extractor_class=MAGICALCNN)
+    else:
+        policy = policy_class(observation_space=wrapped_dummy_env.observation_space,
+                              action_space=wrapped_dummy_env.action_space,
+                              lr_schedule=lambda _: 1e-4,
+                              features_extractor_class=MAGICALCNN)
+
+    run_save_location = os.path.join(save_location, str(round(time())))
+    os.mkdir(run_save_location)
+    imitation_logger.configure(run_save_location, ["stdout", "tensorboard"])
     bc_trainer = BC(
         observation_space=wrapped_dummy_env.observation_space,
         action_space=wrapped_dummy_env.action_space,
@@ -76,6 +105,6 @@ def train_bc(task_name, batch_size, data_root, wrappers, train_epochs, n_traj, l
     bc_trainer.train(n_epochs=train_epochs,
                      n_batches=train_batches,
                      log_interval=log_interval)
-    bc_trainer.save_policy(policy_path=os.path.join(save_location, 'trained_policy.pt'))
+    bc_trainer.save_policy(policy_path=os.path.join(run_save_location, policy_path))
     print("Training complete; cleaning up data pipeline!")
     data_pipeline.close()

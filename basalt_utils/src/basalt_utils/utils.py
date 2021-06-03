@@ -2,6 +2,11 @@ import gym
 import numpy as np
 import minerl
 from copy import deepcopy
+import torch
+import warnings
+import os
+import traceback
+
 
 
 class DummyEnv(gym.Env):
@@ -22,7 +27,62 @@ class DummyEnv(gym.Env):
         return self.observation_space.sample()
 
 
-class ExtractPOVAndTranspose(gym.ObservationWrapper):
+class ActionShaping(gym.ActionWrapper):
+    def __init__(self, env, camera_angle=10, always_attack=False):
+        super().__init__(env)
+
+        self.camera_angle = camera_angle
+        self.always_attack = always_attack
+        self._actions = [
+            [('attack', 1)],
+            [('forward', 1)],
+            #             [('back', 1)],
+            #             [('left', 1)],
+            #             [('right', 1)],
+            #             [('jump', 1)],
+            #             [('forward', 1), ('attack', 1)],
+            [('forward', 1), ('jump', 1)],
+            [('camera', [-self.camera_angle, 0])],
+            [('camera', [self.camera_angle, 0])],
+            [('camera', [0, self.camera_angle])],
+            [('camera', [0, -self.camera_angle])],
+        ]
+
+        self.actions = []
+        for actions in self._actions:
+            act = self.env.action_space.noop()
+            for a, v in actions:
+                act[a] = v
+            if self.always_attack:
+                act['attack'] = 1
+            self.actions.append(act)
+
+        self.action_space = gym.spaces.Discrete(len(self.actions))
+
+    def action(self, action):
+        return self.actions[action]
+
+class NestableObservationWrapper(gym.ObservationWrapper):
+    def observation(self, observation):
+        if hasattr(self.env, 'observation'):
+            return self._observation(self.env.observation(observation))
+        else:
+            return self._observation(observation)
+
+    def _observation(self, observation):
+        raise NotImplementedError
+
+class NormalizeObservations(NestableObservationWrapper):
+    def __init__(self, env, high_val=255):
+        super().__init__(env)
+        self.high_val = high_val
+
+    def _observation(self, observation):
+        assert observation.max() <= self.high_val, f"Observation greater than high val {self.high_val} found"
+        return observation/self.high_val
+
+
+class ExtractPOVAndTranspose(NestableObservationWrapper):
     """
     Basically what it says on the tin. Extracts only the POV observation out of the `obs` dict,
     and transposes those observations to be in the (C, H, W) format used by stable_baselines and imitation
@@ -41,9 +101,9 @@ class ExtractPOVAndTranspose(gym.ObservationWrapper):
                                               dtype=np.uint8)
         self.observation_space = transposed_obs_space
 
-    def observation(self, obs):
+    def _observation(self, observation):
         # Minecraft returns shapes in NHWC by default
-        return np.swapaxes(obs['pov'], -1, -3)
+        return np.swapaxes(observation['pov'], -1, -3)
 
 
 class Testing10000StepLimitWrapper(gym.wrappers.TimeLimit):
@@ -102,6 +162,49 @@ def recursive_squeeze(dictlike):
     return out
 
 
+def warn_on_non_image_tensor(x):
+    """Do some basic checks to make sure the input image tensor looks like a
+    batch of stacked square frames. Good sanity check to make sure that
+    preprocessing is not being messed up somehow."""
+    stack_str = None
+
+    def do_warning(message):
+        # issue a warning, but annotate it with some information about the
+        # stack (specifically, basenames of code files and line number at the
+        # time of exception for each stack frame except this one)
+        nonlocal stack_str
+        if stack_str is None:
+            frames = traceback.extract_stack()
+            stack_str = '/'.join(
+                f'{os.path.basename(frame.filename)}:{frame.lineno}'
+                # [:-1] skips the current frame
+                for frame in frames[:-1])
+        warnings.warn(message + f" (stack: {stack_str})")
+
+    # check that image has rank 4
+    if x.ndim != 4:
+        do_warning(f"Image tensor has rank {x.ndim}, not rank 4")
+
+    # check that H=W
+    if x.shape[2] != x.shape[3]:
+        do_warning(
+            f"Image tensor shape {x.shape} doesn't have square images")
+
+    # check that image is in [0,1] (approximately)
+    # this is the range that SB uses
+    v_min = torch.min(x).item()
+    v_max = torch.max(x).item()
+    if v_min < -0.01 or v_max > 1.01:
+        do_warning(
+            f"Input image tensor has values in range [{v_min}, {v_max}], "
+            "not expected range [0, 1]")
+
+    std = torch.std(x).item()
+    if std < 0.05:
+        do_warning(
+            f"Input image tensor values have low stddev {std} (range "
+            f"[{v_min}, {v_max}])")
+
 def get_data_pipeline_and_env(task_name, data_root, wrappers):
     """
     This code loads a data pipeline object and creates a dummy environment with the
@@ -138,12 +241,12 @@ def create_data_iterator(wrapped_dummy_env, data_pipeline, batch_size, num_epoch
     if num_epochs is None:
         num_epochs = 100
         print("Training with an undefined number of epochs (defined number of batches), using 100-epoch data iterator")
-
-    assert n_traj >= batch_size, "You need to run with more trajectories than your batch size"
+    if n_traj is not None:
+        assert n_traj >= batch_size, "You need to run with more trajectories than your batch size"
     for current_obs, action, reward, next_obs, done in data_pipeline.batch_iter(batch_size=batch_size,
                                                                                 num_epochs=num_epochs,
-                                                                                seq_len=1,
-                                                                                epoch_size=n_traj):
+                                                                                seq_len=1): #,
+                                                                                #epoch_size=n_traj):
         wrapped_obs = optional_observation_map(wrapped_dummy_env,
                                                recursive_squeeze(current_obs))
         wrapped_next_obs = optional_observation_map(wrapped_dummy_env,

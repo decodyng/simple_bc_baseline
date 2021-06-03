@@ -1,22 +1,17 @@
 # Simple env test.
-import json
-import select
-import time
 import logging
 import os
 
 import aicrowd_helper
-import gym
-import minerl
 from utility.parser import Parser
 
 import coloredlogs
-from train_bc import bc_baseline
-import realistic_benchmarks
+from basalt_baselines.bc import bc_baseline
+
 coloredlogs.install(logging.DEBUG)
 
 # All the evaluations will be evaluated on MineRLObtainDiamond-v0 environment
-MINERL_GYM_ENV = os.getenv('MINERL_GYM_ENV', 'MineRLObtainDiamondVectorObf-v0')
+MINERL_GYM_ENV = os.getenv('MINERL_GYM_ENV', 'MineRLTreechop-v0')
 # You need to ensure that your submission is trained in under MINERL_TRAINING_MAX_STEPS steps
 MINERL_TRAINING_MAX_STEPS = int(os.getenv('MINERL_TRAINING_MAX_STEPS', 8000000))
 # You need to ensure that your submission is trained by launching less than MINERL_TRAINING_MAX_INSTANCES instances
@@ -49,6 +44,7 @@ def main():
     This function will be called for training phase.
     """
     TRAINING_EXPERIMENT.run(config_updates={'data_root': MINERL_DATA_ROOT,
+                                            'task_name': MINERL_GYM_ENV,
                                             'save_location': "train"})
     aicrowd_helper.register_progress(1)
 
