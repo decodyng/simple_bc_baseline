@@ -243,6 +243,7 @@ def create_data_iterator(wrapped_dummy_env, data_pipeline, batch_size, num_epoch
         print("Training with an undefined number of epochs (defined number of batches), using 100-epoch data iterator")
     if n_traj is not None:
         assert n_traj >= batch_size, "You need to run with more trajectories than your batch size"
+    breakpoint()
     for current_obs, action, reward, next_obs, done in data_pipeline.batch_iter(batch_size=batch_size,
                                                                                 num_epochs=num_epochs,
                                                                                 seq_len=1): #,

@@ -101,7 +101,6 @@ def train_bc(task_name, batch_size, data_root, wrappers, train_epochs, n_traj, l
         optimizer_kwargs=dict(lr=lr),
         ent_weight=1e-3,
         l2_weight=1e-5)
-
     bc_trainer.train(n_epochs=train_epochs,
                      n_batches=train_batches,
                      log_interval=log_interval)
