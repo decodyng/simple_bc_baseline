@@ -118,8 +118,8 @@ def wrap_env(env, wrappers):
     """
     Wrap `env` in all gym wrappers specified by `wrappers`
     """
-    for wrapper in wrappers:
-        env = wrapper(env)
+    for wrapper, args in wrappers:
+        env = wrapper(env, **args)
     return env
 
 
@@ -205,9 +205,10 @@ def warn_on_non_image_tensor(x):
             f"Input image tensor values have low stddev {std} (range "
             f"[{v_min}, {v_max}])")
 
-def get_data_pipeline_and_env(task_name, data_root, wrappers):
+
+def get_data_pipeline_and_env(task_name, data_root, wrappers, dummy=True):
     """
-    This code loads a data pipeline object and creates a dummy environment with the
+    This code loads a data pipeline object and creates an (optionally dummy) environment with the
     same observation and action space as the (wrapped) environment you want to train on
 
     :param task_name: The name of the MineRL task you want to get data for
@@ -216,10 +217,13 @@ def get_data_pipeline_and_env(task_name, data_root, wrappers):
     """
     data_pipeline = minerl.data.make(environment=task_name,
                                      data_dir=data_root)
-    dummy_env = DummyEnv(action_space=data_pipeline.action_space,
-                         observation_space=data_pipeline.observation_space)
-    wrapped_dummy_env = wrap_env(dummy_env, wrappers)
-    return data_pipeline, wrapped_dummy_env
+    if dummy:
+        env = DummyEnv(action_space=data_pipeline.action_space,
+                       observation_space=data_pipeline.observation_space)
+    else:
+        env = gym.make(task_name)
+    wrapped_env = wrap_env(env, wrappers)
+    return data_pipeline, wrapped_env
 
 
 def create_data_iterator(wrapped_dummy_env, data_pipeline, batch_size, num_epochs, n_traj, remove_no_ops=False):
@@ -243,7 +247,6 @@ def create_data_iterator(wrapped_dummy_env, data_pipeline, batch_size, num_epoch
         print("Training with an undefined number of epochs (defined number of batches), using 100-epoch data iterator")
     if n_traj is not None:
         assert n_traj >= batch_size, "You need to run with more trajectories than your batch size"
-    breakpoint()
     for current_obs, action, reward, next_obs, done in data_pipeline.batch_iter(batch_size=batch_size,
                                                                                 num_epochs=num_epochs,
                                                                                 seq_len=1): #,
