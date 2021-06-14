@@ -8,7 +8,6 @@ import os
 import traceback
 
 
-
 class DummyEnv(gym.Env):
     """
     A simplistic class that lets us mock up a gym Environment that is sufficient for our purposes
@@ -27,41 +26,6 @@ class DummyEnv(gym.Env):
         return self.observation_space.sample()
 
 
-class ActionShaping(gym.ActionWrapper):
-    def __init__(self, env, camera_angle=10, always_attack=False):
-        super().__init__(env)
-
-        self.camera_angle = camera_angle
-        self.always_attack = always_attack
-        self._actions = [
-            [('attack', 1)],
-            [('forward', 1)],
-            #             [('back', 1)],
-            #             [('left', 1)],
-            #             [('right', 1)],
-            #             [('jump', 1)],
-            #             [('forward', 1), ('attack', 1)],
-            [('forward', 1), ('jump', 1)],
-            [('camera', [-self.camera_angle, 0])],
-            [('camera', [self.camera_angle, 0])],
-            [('camera', [0, self.camera_angle])],
-            [('camera', [0, -self.camera_angle])],
-        ]
-
-        self.actions = []
-        for actions in self._actions:
-            act = self.env.action_space.noop()
-            for a, v in actions:
-                act[a] = v
-            if self.always_attack:
-                act['attack'] = 1
-            self.actions.append(act)
-
-        self.action_space = gym.spaces.Discrete(len(self.actions))
-
-    def action(self, action):
-        return self.actions[action]
-
 class NestableObservationWrapper(gym.ObservationWrapper):
     def observation(self, observation):
         if hasattr(self.env, 'observation'):
@@ -71,6 +35,7 @@ class NestableObservationWrapper(gym.ObservationWrapper):
 
     def _observation(self, observation):
         raise NotImplementedError
+
 
 class NormalizeObservations(NestableObservationWrapper):
     def __init__(self, env, high_val=255):
@@ -205,6 +170,7 @@ def warn_on_non_image_tensor(x):
             f"Input image tensor values have low stddev {std} (range "
             f"[{v_min}, {v_max}])")
 
+
 def get_data_pipeline_and_env(task_name, data_root, wrappers):
     """
     This code loads a data pipeline object and creates a dummy environment with the
@@ -222,7 +188,14 @@ def get_data_pipeline_and_env(task_name, data_root, wrappers):
     return data_pipeline, wrapped_dummy_env
 
 
-def create_data_iterator(wrapped_dummy_env, data_pipeline, batch_size, num_epochs, n_traj, remove_no_ops=False):
+def create_data_iterator(
+        wrapped_dummy_env: gym.Env,
+        data_pipeline: minerl.data.DataPipeline,
+        batch_size: int,
+        num_epochs: int,
+        n_traj: int,
+        remove_no_ops: bool = False,
+) -> dict:
     """
     Construct a data iterator that (1) loads data from disk, and (2) wraps it in the set of
     wrappers that have been applied to `wrapped_dummy_env`.
@@ -233,9 +206,11 @@ def create_data_iterator(wrapped_dummy_env, data_pipeline, batch_size, num_epoch
     :param batch_size: The batch size we want the iterator to produce
     :param num_epochs: The number of epochs we want the underlying iterator to run for
     :param n_traj: The number of trajectories we want to load; should be >= the batch size
-    :param remove_no_ops: Whether to remove transitions with no-op demonstrator actions from batches as they are generated
+    :param remove_no_ops: Whether to remove transitions with no-op demonstrator actions from batches
+    as they are generated. For now, this corresponds to all-zeros.
 
-    :yield: wrapped observations and actions
+    :yield: Wrapped observations and actions in a dict with the keys "obs", "acts", "rews",
+         "next_obs", "dones".
     """
 
     if num_epochs is None:
@@ -243,10 +218,9 @@ def create_data_iterator(wrapped_dummy_env, data_pipeline, batch_size, num_epoch
         print("Training with an undefined number of epochs (defined number of batches), using 100-epoch data iterator")
     if n_traj is not None:
         assert n_traj >= batch_size, "You need to run with more trajectories than your batch size"
-    breakpoint()
     for current_obs, action, reward, next_obs, done in data_pipeline.batch_iter(batch_size=batch_size,
                                                                                 num_epochs=num_epochs,
-                                                                                seq_len=1): #,
+                                                                                seq_len=1):
                                                                                 #epoch_size=n_traj):
         wrapped_obs = optional_observation_map(wrapped_dummy_env,
                                                recursive_squeeze(current_obs))
@@ -264,6 +238,6 @@ def create_data_iterator(wrapped_dummy_env, data_pipeline, batch_size, num_epoch
 
         yield dict(obs=wrapped_obs,
                    acts=wrapped_action,
-                   rew=reward,
+                   rews=reward,
                    next_obs=wrapped_next_obs,
                    dones=done)

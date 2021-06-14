@@ -1,4 +1,6 @@
+import datetime
 import minerl
+import namesgenerator
 from sacred import Experiment
 import basalt_utils.wrappers as wrapper_utils
 from stable_baselines3.common.torch_layers import NatureCNN
@@ -10,7 +12,6 @@ import torch as th
 from basalt_utils import utils
 import os
 import imitation.util.logger as imitation_logger
-from time import time
 
 bc_baseline = Experiment("basalt_bc_baseline")
 
@@ -25,9 +26,17 @@ WRAPPERS = [# Transforms continuous camera action into discrete up/down/no-chang
             # utils.Testing10000StepLimitWrapper,
             # wrapper_utils.FrameSkip]
 
+
+def make_unique_timestamp() -> str:
+    """Make a timestamp along with a random word descriptor: e.g. 2021-06-06_1236_boring_wozniac"""
+    ISO_TIMESTAMP = "%Y%m%d_%H%M"
+    timestamp = datetime.datetime.now().strftime(ISO_TIMESTAMP)
+    return f"{timestamp}_{namesgenerator.get_random_name()}"
+
+
 @bc_baseline.config
 def default_config():
-    task_name = "MineRLFindCaves-v0"
+    task_name = "MineRLFindCaves-v0"  # TODO(shwang): Rename to env_name?
     train_batches = 10
     train_epochs = None
     log_interval = 1
@@ -36,11 +45,19 @@ def default_config():
     # maintaining multiple sub-distributions and merging their results
     policy_class = SpaceFlatteningActorCriticPolicy
     wrappers = WRAPPERS
-    save_location = "/Users/cody/Code/simple_bc_baseline/results"
-    policy_path = 'trained_policy.pt'
+    save_dir_base = "results/"
+    save_dir = None
+    policy_filename = 'trained_policy.pt'
     batch_size = 32
     n_traj = None
     lr = 1e-4
+    _ = locals()
+    del _
+
+@bc_baseline.config
+def default_save_dir(save_dir_base, save_dir, task_name):
+    if save_dir is None:
+        save_dir = os.path.join(save_dir_base, task_name, make_unique_timestamp())
     _ = locals()
     del _
 
@@ -53,7 +70,7 @@ def normal_policy_class():
 
 @bc_baseline.automain
 def train_bc(task_name, batch_size, data_root, wrappers, train_epochs, n_traj, lr,
-             policy_class, train_batches, log_interval, save_location, policy_path):
+             policy_class, train_batches, log_interval, save_dir, policy_filename):
 
     # This code is designed to let you either train for a fixed number of batches, or for a fixed number of epochs
     assert train_epochs is None or train_batches is None, \
@@ -87,13 +104,12 @@ def train_bc(task_name, batch_size, data_root, wrappers, train_epochs, n_traj, l
                               lr_schedule=lambda _: 1e-4,
                               features_extractor_class=MAGICALCNN)
 
-    run_save_location = os.path.join(save_location, str(round(time())))
-    os.mkdir(run_save_location)
-    imitation_logger.configure(run_save_location, ["stdout", "tensorboard"])
+    os.makedirs(save_dir, exist_ok=True)
+    imitation_logger.configure(save_dir, ["stdout", "tensorboard"])
     bc_trainer = BC(
         observation_space=wrapped_dummy_env.observation_space,
         action_space=wrapped_dummy_env.action_space,
-        policy_class= lambda **kwargs: policy,
+        policy_class=lambda **kwargs: policy,
         policy_kwargs=None,
         expert_data=data_iter,
         device='auto',
@@ -104,6 +120,6 @@ def train_bc(task_name, batch_size, data_root, wrappers, train_epochs, n_traj, l
     bc_trainer.train(n_epochs=train_epochs,
                      n_batches=train_batches,
                      log_interval=log_interval)
-    bc_trainer.save_policy(policy_path=os.path.join(run_save_location, policy_path))
+    bc_trainer.save_policy(policy_path=os.path.join(save_dir, policy_filename))
     print("Training complete; cleaning up data pipeline!")
     data_pipeline.close()
