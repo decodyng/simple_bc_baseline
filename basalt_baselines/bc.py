@@ -75,7 +75,13 @@ def main(mode):
 
 
 @bc_baseline.capture
-def test_bc(task_name, data_root, wrappers, test_policy_path, test_n_rollouts):
+def test_bc(task_name, data_root, wrappers, test_policy_path, test_n_rollouts, save_videos, save_location):
+    run_save_location = os.path.join(save_location, str(round(time())))
+    os.mkdir(run_save_location)
+
+    if save_videos:
+        wrappers = [(VideoRecordingWrapper, {'video_directory':
+                                                 os.path.join(run_save_location, 'videos')})] + wrappers
     data_pipeline, wrapped_env = utils.get_data_pipeline_and_env(task_name, data_root, wrappers, dummy=False)
     vec_env = DummyVecEnv([lambda: wrapped_env])
     policy = th.load(test_policy_path)
@@ -164,7 +170,7 @@ def train_bc(task_name, batch_size, data_root, wrappers, train_epochs, n_traj, l
     bc_baseline.add_artifact(os.path.join(run_save_location, policy_path))
     bc_baseline.log_scalar(f'run_location={run_save_location}', 1)
     print("Training complete; cleaning up data pipeline!")
-    #data_pipeline.close()
+    data_pipeline.close()
 
 
 if __name__ == "__main__":
