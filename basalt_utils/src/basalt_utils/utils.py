@@ -1,7 +1,6 @@
 import gym
 import numpy as np
 import minerl
-from copy import deepcopy
 import torch
 import warnings
 import os
@@ -83,8 +82,8 @@ def wrap_env(env, wrappers):
     """
     Wrap `env` in all gym wrappers specified by `wrappers`
     """
-    for wrapper in wrappers:
-        env = wrapper(env)
+    for wrapper, args in wrappers:
+        env = wrapper(env, **args)
     return env
 
 
@@ -171,9 +170,9 @@ def warn_on_non_image_tensor(x):
             f"[{v_min}, {v_max}])")
 
 
-def get_data_pipeline_and_env(task_name, data_root, wrappers):
+def get_data_pipeline_and_env(task_name, data_root, wrappers, dummy=True):
     """
-    This code loads a data pipeline object and creates a dummy environment with the
+    This code loads a data pipeline object and creates an (optionally dummy) environment with the
     same observation and action space as the (wrapped) environment you want to train on
 
     :param task_name: The name of the MineRL task you want to get data for
@@ -182,10 +181,13 @@ def get_data_pipeline_and_env(task_name, data_root, wrappers):
     """
     data_pipeline = minerl.data.make(environment=task_name,
                                      data_dir=data_root)
-    dummy_env = DummyEnv(action_space=data_pipeline.action_space,
-                         observation_space=data_pipeline.observation_space)
-    wrapped_dummy_env = wrap_env(dummy_env, wrappers)
-    return data_pipeline, wrapped_dummy_env
+    if dummy:
+        env = DummyEnv(action_space=data_pipeline.action_space,
+                       observation_space=data_pipeline.observation_space)
+    else:
+        env = gym.make(task_name)
+    wrapped_env = wrap_env(env, wrappers)
+    return data_pipeline, wrapped_env
 
 
 def create_data_iterator(
