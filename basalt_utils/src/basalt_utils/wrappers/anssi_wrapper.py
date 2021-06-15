@@ -49,7 +49,7 @@ class AnssiActionShaping(ReversibleActionWrapper):
     def action(self, action):
         return self.actions[action]
 
-    def reverse_action(self, action):
+    def reverse_action(self, action: dict) -> np.ndarray:
         camera_actions = action["camera"].squeeze()
         attack_actions = action["attack"].squeeze()
         forward_actions = action["forward"].squeeze()

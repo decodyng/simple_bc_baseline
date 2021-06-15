@@ -44,7 +44,7 @@ def make_unique_timestamp() -> str:
 
 @bc_baseline.config
 def default_config():
-    task_name = "MineRLFindCaves-v0"
+    task_name = "MineRLBasaltFindCave-v0"
     train_batches = None
     train_epochs = None
     log_interval = 1
@@ -114,7 +114,7 @@ def test_bc(task_name, data_root, wrappers, test_policy_path, test_n_rollouts, s
 
 @bc_baseline.capture
 def train_bc(task_name, batch_size, data_root, wrappers, train_epochs, n_traj, lr,
-             policy_class, train_batches, log_interval, save_dir, policy_path,
+             policy_class, train_batches, log_interval, save_dir, policy_filename,
              use_rollout_callback, callback_batch_interval, callback_rollouts, save_videos):
 
     # This code is designed to let you either train for a fixed number of batches, or for a fixed number of epochs
@@ -180,11 +180,11 @@ def train_bc(task_name, batch_size, data_root, wrappers, train_epochs, n_traj, l
                      n_batches=train_batches,
                      log_interval=log_interval,
                      on_batch_end=callback)
-    bc_trainer.save_policy(policy_path=os.path.join(save_dir, policy_path))
-    bc_baseline.add_artifact(os.path.join(save_dir, policy_path))
+    bc_trainer.save_policy(policy_path=os.path.join(save_dir, policy_filename))
+    bc_baseline.add_artifact(os.path.join(save_dir, policy_filename))
     bc_baseline.log_scalar(f'run_location={save_dir}', 1)
     print("Training complete; cleaning up data pipeline!")
-    data_pipeline.close()
+    data_iter.close()
 
 
 if __name__ == "__main__":
