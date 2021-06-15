@@ -1,4 +1,6 @@
+import datetime
 import minerl
+import namesgenerator
 from sacred import Experiment
 import basalt_utils.wrappers as wrapper_utils
 from stable_baselines3.common.torch_layers import NatureCNN
@@ -33,9 +35,16 @@ WRAPPERS = [# Transforms continuous camera action into discrete up/down/no-chang
             # wrapper_utils.FrameSkip]
 
 
+def make_unique_timestamp() -> str:
+    """Make a timestamp along with a random word descriptor: e.g. 2021-06-06_1236_boring_wozniac"""
+    ISO_TIMESTAMP = "%Y%m%d_%H%M"
+    timestamp = datetime.datetime.now().strftime(ISO_TIMESTAMP)
+    return f"{timestamp}_{namesgenerator.get_random_name()}"
+
+
 @bc_baseline.config
 def default_config():
-    task_name = "MineRLFindCaves-v0"
+    task_name = "MineRLBasaltFindCave-v0"
     train_batches = None
     train_epochs = None
     log_interval = 1
@@ -44,8 +53,9 @@ def default_config():
     # maintaining multiple sub-distributions and merging their results
     policy_class = SpaceFlatteningActorCriticPolicy
     wrappers = WRAPPERS
-    save_location = "/Users/cody/Code/simple_bc_baseline/results"
-    policy_path = 'trained_policy.pt'
+    save_dir_base = "results/"
+    save_dir = None
+    policy_filename = 'trained_policy.pt'
     use_rollout_callback = False
     callback_batch_interval = 1000
     callback_rollouts = 5
@@ -56,6 +66,13 @@ def default_config():
     batch_size = 32
     n_traj = None
     lr = 1e-4
+    _ = locals()
+    del _
+
+@bc_baseline.config
+def default_save_dir(save_dir_base, save_dir, task_name):
+    if save_dir is None:
+        save_dir = os.path.join(save_dir_base, task_name, make_unique_timestamp())
     _ = locals()
     del _
 
@@ -75,13 +92,12 @@ def main(mode):
 
 
 @bc_baseline.capture
-def test_bc(task_name, data_root, wrappers, test_policy_path, test_n_rollouts, save_videos, save_location):
-    run_save_location = os.path.join(save_location, str(round(time())))
-    os.mkdir(run_save_location)
+def test_bc(task_name, data_root, wrappers, test_policy_path, test_n_rollouts, save_videos, save_dir):
+    os.makedirs(save_dir, exist_ok=True)
 
     if save_videos:
         wrappers = [(VideoRecordingWrapper, {'video_directory':
-                                                 os.path.join(run_save_location, 'videos')})] + wrappers
+                                                 os.path.join(save_dir, 'videos')})] + wrappers
     data_pipeline, wrapped_env = utils.get_data_pipeline_and_env(task_name, data_root, wrappers, dummy=False)
     vec_env = DummyVecEnv([lambda: wrapped_env])
     policy = th.load(test_policy_path)
@@ -98,7 +114,7 @@ def test_bc(task_name, data_root, wrappers, test_policy_path, test_n_rollouts, s
 
 @bc_baseline.capture
 def train_bc(task_name, batch_size, data_root, wrappers, train_epochs, n_traj, lr,
-             policy_class, train_batches, log_interval, save_location, policy_path,
+             policy_class, train_batches, log_interval, save_dir, policy_filename,
              use_rollout_callback, callback_batch_interval, callback_rollouts, save_videos):
 
     # This code is designed to let you either train for a fixed number of batches, or for a fixed number of epochs
@@ -106,9 +122,6 @@ def train_bc(task_name, batch_size, data_root, wrappers, train_epochs, n_traj, l
         "Only one of train_batches or train_epochs should be set"
     assert not (train_batches is None and train_epochs is None), \
         "You cannot have both train_epochs and train_epochs set to None"
-
-    run_save_location = os.path.join(save_location, str(round(time())))
-    os.mkdir(run_save_location)
 
     # This `get_data_pipeline_and_env` utility is designed to be shared across multiple baselines
     # It takes in a task name, data root, and set of wrappers and returns
@@ -119,7 +132,7 @@ def train_bc(task_name, batch_size, data_root, wrappers, train_epochs, n_traj, l
     #     up that iterator after training.
     if save_videos:
         wrappers = [(VideoRecordingWrapper, {'video_directory':
-                                                 os.path.join(run_save_location, 'videos')})] + wrappers
+                                                 os.path.join(save_dir, 'videos')})] + wrappers
     data_pipeline, wrapped_env = utils.get_data_pipeline_and_env(task_name, data_root, wrappers,
                                                                  dummy=not use_rollout_callback)
 
@@ -141,11 +154,12 @@ def train_bc(task_name, batch_size, data_root, wrappers, train_epochs, n_traj, l
                               lr_schedule=lambda _: 1e-4,
                               features_extractor_class=MAGICALCNN)
 
-    imitation_logger.configure(run_save_location, ["stdout", "tensorboard"])
+    os.makedirs(save_dir, exist_ok=True)
+    imitation_logger.configure(save_dir, ["stdout", "tensorboard"])
     if use_rollout_callback:
         callback = BatchEndIntermediateRolloutEvaluator(policy=policy,
                                                         env=wrapped_env,
-                                                        save_dir=os.path.join(run_save_location, 'policy'),
+                                                        save_dir=os.path.join(save_dir, 'policy'),
                                                         evaluate_interval_batches=callback_batch_interval,
                                                         n_rollouts=callback_rollouts)
     else:
@@ -166,11 +180,11 @@ def train_bc(task_name, batch_size, data_root, wrappers, train_epochs, n_traj, l
                      n_batches=train_batches,
                      log_interval=log_interval,
                      on_batch_end=callback)
-    bc_trainer.save_policy(policy_path=os.path.join(run_save_location, policy_path))
-    bc_baseline.add_artifact(os.path.join(run_save_location, policy_path))
-    bc_baseline.log_scalar(f'run_location={run_save_location}', 1)
+    bc_trainer.save_policy(policy_path=os.path.join(save_dir, policy_filename))
+    bc_baseline.add_artifact(os.path.join(save_dir, policy_filename))
+    bc_baseline.log_scalar(f'run_location={save_dir}', 1)
     print("Training complete; cleaning up data pipeline!")
-    data_pipeline.close()
+    data_iter.close()
 
 
 if __name__ == "__main__":
